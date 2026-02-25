@@ -38,3 +38,24 @@ Insert into existing `messages` table (or create `chatgpt_conversations` staging
 - Cookies expire — this is a one-shot or periodic manual run, not a daemon
 - Store raw conversation JSON in metadata column for future use
 - Handle rate limiting with exponential backoff
+
+---
+
+## Status Endpoint
+
+Exposes `GET /api/status` for health reporting and usage data. Used by OpenClaw directly or via an aggregator.
+
+```json
+{
+  "service": "chatgpt",
+  "status": "ok",
+  "last_sync": "2026-02-25T03:00:00Z",
+  "conversations_total": 842,
+  "messages_total": 12430,
+  "last_conversation_date": "2026-02-24T22:00:00Z",
+  "api_reachable": true,
+  "cached_at": "2026-02-25T03:00:00Z"
+}
+```
+
+Cache TTL: 5 minutes. Force refresh with `GET /api/status?refresh=true`.
