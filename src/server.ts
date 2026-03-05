@@ -574,7 +574,8 @@ const LOGIN_HTML = /* html */ `<!DOCTYPE html>
 <div class="controls">
   <button id="start-btn" onclick="startSession()">▶ Start Login</button>
   <button id="stop-btn" class="danger" onclick="stopSession()" disabled>■ Stop</button>
-  <input id="type-input" type="text" placeholder="Type text and press Enter…" onkeydown="onInputKey(event)"/>
+  <input id="type-input" type="text" placeholder="Type text and press Enter (or Send)…" autocomplete="off" spellcheck="false"/>
+  <button class="secondary" onclick="sendInput()" disabled id="send-btn">Send</button>
   <div class="key-group">
     <button class="secondary" onclick="sendKey('Enter')" disabled id="key-enter">↵ Enter</button>
     <button class="secondary" onclick="sendKey('Tab')" disabled id="key-tab">⇥ Tab</button>
@@ -619,6 +620,7 @@ function setStatus(text, dotClass) {
 function setControlsEnabled(enabled) {
   sessionActive = enabled;
   document.getElementById('stop-btn').disabled = !enabled;
+  document.getElementById('send-btn').disabled = !enabled;
   ['key-enter','key-tab','key-bs','key-esc'].forEach(id => {
     document.getElementById(id).disabled = !enabled;
   });
@@ -733,25 +735,38 @@ canvasWrap.addEventListener('wheel', (event) => {
   ws.send(JSON.stringify({ type: 'scroll', x: Math.round(relX * canvas.width), y: Math.round(relY * canvas.height), deltaY: event.deltaY }));
 }, { passive: false });
 
+/* ── Input box: keydown + paste ─────────────────────────────────────────── */
+const typeInput = document.getElementById('type-input');
+
+typeInput.addEventListener('keydown', (event) => {
+  event.stopPropagation();                       // never let the global handler see input keys
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    sendInput();
+  }
+});
+
+typeInput.addEventListener('paste', (event) => {
+  event.stopPropagation();                       // keep paste inside the input
+});
+
+function sendInput() {
+  const text = typeInput.value;
+  if (text && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'type', text }));
+    typeInput.value = '';
+  }
+}
+
+/* ── Global keydown: forward to CDP when canvas is focused ─────────────── */
 document.addEventListener('keydown', (event) => {
   if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
-  if (document.activeElement === document.getElementById('type-input')) return;
+  if (document.activeElement === typeInput) return;           // input handles itself
+  if (event.ctrlKey || event.metaKey || event.altKey) return; // don't swallow OS shortcuts
   event.preventDefault();
   if (event.key.length === 1) ws.send(JSON.stringify({ type: 'type', text: event.key }));
   else ws.send(JSON.stringify({ type: 'keydown', key: event.key }));
 });
-
-function onInputKey(event) {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    const input = document.getElementById('type-input');
-    const text = input.value;
-    if (text && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'type', text }));
-      input.value = '';
-    }
-  }
-}
 
 function sendKey(key) {
   if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
