@@ -243,6 +243,8 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
     cdpWs.on('open', () => {
       cdpCommand('Page.enable');
       cdpCommand('Network.enable');
+      cdpCommand('Runtime.enable');
+      cdpCommand('Log.enable');
       cdpCommand('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
       cdpCommand('Target.setDiscoverTargets', { discover: true });
       // Redirect popups to main page (Google OAuth, etc.)
@@ -343,7 +345,27 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
           }
         }
 
-        if (msg.method === 'Page.screencastFrame') {
+        if (msg.method === 'Runtime.consoleAPICalled') {
+          const params = msg.params as { type?: string; args?: Array<{ value?: unknown; description?: string }> };
+          const level = (params.type ?? 'log').toUpperCase();
+          const rendered = (params.args ?? [])
+            .map((a) => (a?.value !== undefined ? String(a.value) : (a?.description ?? '')))
+            .filter(Boolean)
+            .join(' ');
+          if (rendered) console.log(`[browser:${level}] ${rendered}`);
+
+        } else if (msg.method === 'Runtime.exceptionThrown') {
+          const details = (msg.params as { exceptionDetails?: { text?: string; url?: string; lineNumber?: number; columnNumber?: number } })?.exceptionDetails;
+          console.error(`[browser:EXCEPTION] ${details?.text ?? 'Unknown exception'} @ ${details?.url ?? 'unknown'}:${(details?.lineNumber ?? 0) + 1}:${(details?.columnNumber ?? 0) + 1}`);
+
+        } else if (msg.method === 'Log.entryAdded') {
+          const entry = (msg.params as { entry?: { level?: string; source?: string; text?: string; url?: string; lineNumber?: number } })?.entry;
+          if (entry?.text) {
+            const level = (entry.level ?? 'info').toUpperCase();
+            console.log(`[browser:${level}] [${entry.source ?? 'log'}] ${entry.text}${entry.url ? ` (${entry.url}:${entry.lineNumber ?? 0})` : ''}`);
+          }
+
+        } else if (msg.method === 'Page.screencastFrame') {
           const params = msg.params as { sessionId: number; data: string; metadata: unknown };
           if (clientWs.readyState === NodeWebSocket.OPEN) {
             clientWs.send(JSON.stringify({ type: 'frame', data: params.data, metadata: params.metadata }));
@@ -413,12 +435,16 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
 
         } else if (msg.method === 'Network.responseReceived') {
           // Intercept /api/auth/session response to capture token directly
-          const params = msg.params as { response?: { url?: string }; requestId?: string };
+          const params = msg.params as { response?: { url?: string; status?: number }; requestId?: string };
           const responseUrl = params.response?.url ?? '';
           if (responseUrl.includes('/api/auth/session')) {
-            console.log('[login] Detected /api/auth/session response — attempting extraction...');
+            console.log(`[login] /api/auth/session status=${params.response?.status ?? 'unknown'} — attempting extraction...`);
             setTimeout(() => void checkAndCapture(), 500);
           }
+
+        } else if (msg.method === 'Network.loadingFailed') {
+          const params = msg.params as { requestId?: string; errorText?: string; blockedReason?: string; canceled?: boolean };
+          console.log(`[browser:NETWORK_FAIL] request=${params.requestId ?? 'unknown'} error=${params.errorText ?? 'unknown'} blocked=${params.blockedReason ?? 'none'} canceled=${params.canceled ? 'yes' : 'no'}`);
         }
       } catch {}
     });
