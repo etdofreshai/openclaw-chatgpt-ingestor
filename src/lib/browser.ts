@@ -12,8 +12,13 @@ const CHROMIUM_PATH = process.env.CHROME_EXECUTABLE_PATH
   ?? process.env.PUPPETEER_EXECUTABLE_PATH
   ?? ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => existsSync(p))
   ?? '/usr/bin/chromium';
-const CDP_PORT = 9224;
+const CDP_PORT = Number(process.env.CDP_PORT ?? 9224);
 const CDP_BASE = `http://localhost:${CDP_PORT}`;
+const HEADLESS = (process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
+const CHROME_LANG = process.env.CHROME_LANG ?? 'en-US,en;q=0.9';
+const CHROME_TZ = process.env.CHROME_TIMEZONE ?? 'America/Chicago';
+const CHROME_UA = process.env.CHROME_USER_AGENT
+  ?? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
 const SUPPRESSED_PATTERNS = [
   /Failed to connect to.*bus/i,
@@ -81,8 +86,7 @@ export async function ensureChromium(): Promise<void> {
         try { fs.unlinkSync(p); } catch {}
       }
 
-      chromiumProc = spawn(CHROMIUM_PATH, [
-        '--headless=new',
+      const launchArgs = [
         '--disable-gpu',
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -93,6 +97,7 @@ export async function ensureChromium(): Promise<void> {
         `--remote-debugging-port=${CDP_PORT}`,
         '--remote-debugging-address=0.0.0.0',
         `--user-data-dir=${PROFILE_DIR}`,
+        `--lang=${CHROME_LANG}`,
         '--disable-dbus-activation',
         '--disable-breakpad',
         '--disable-background-networking',
@@ -104,7 +109,10 @@ export async function ensureChromium(): Promise<void> {
         '--no-first-run',
         '--metrics-recording-only',
         'about:blank',
-      ], {
+      ];
+      if (HEADLESS) launchArgs.unshift('--headless=new');
+
+      chromiumProc = spawn(CHROMIUM_PATH, launchArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
@@ -139,7 +147,7 @@ export async function ensureChromium(): Promise<void> {
       }
 
       await waitForCdp();
-      console.log('[chatgpt] Chromium started with CDP on port ' + CDP_PORT);
+      console.log(`[chatgpt] Chromium started with CDP on port ${CDP_PORT} (${HEADLESS ? 'headless' : 'headful'})`);
     } finally {
       starting = null;
     }
@@ -212,4 +220,4 @@ export async function createChatGPTLoginScreencast(): Promise<{ webSocketDebugge
   return tab;
 }
 
-export { CDP_PORT };
+export { CDP_PORT, CHROME_UA, CHROME_TZ };

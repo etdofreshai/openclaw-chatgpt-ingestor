@@ -12,6 +12,8 @@ import {
   createChatGPTLoginScreencast,
   cdpListTabs,
   cdpCloseTab,
+  CHROME_UA,
+  CHROME_TZ,
 } from './lib/browser.js';
 import {
   setCookies,
@@ -245,14 +247,24 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
       cdpCommand('Network.enable');
       cdpCommand('Runtime.enable');
       cdpCommand('Log.enable');
+      cdpCommand('Network.setUserAgentOverride', {
+        userAgent: CHROME_UA,
+        acceptLanguage: 'en-US,en;q=0.9',
+        platform: 'Linux x86_64',
+      });
+      cdpCommand('Emulation.setTimezoneOverride', { timezoneId: CHROME_TZ });
       cdpCommand('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
       cdpCommand('Target.setDiscoverTargets', { discover: true });
       // Redirect popups to main page (Google OAuth, etc.)
       cdpCommand('Page.addScriptToEvaluateOnNewDocument', {
-        source: `window.__origOpen = window.open; window.open = function(url) {
-          if (url && url !== 'about:blank') { window.location.href = url; return window; }
-          return window.__origOpen.apply(this, arguments);
-        };`,
+        source: `
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          window.__origOpen = window.open;
+          window.open = function(url) {
+            if (url && url !== 'about:blank') { window.location.href = url; return window; }
+            return window.__origOpen.apply(this, arguments);
+          };
+        `,
       });
       cdpCommand('Page.startScreencast', {
         format: 'jpeg',
