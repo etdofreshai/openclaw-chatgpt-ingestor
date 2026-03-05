@@ -4,10 +4,14 @@
  */
 import { spawn, type ChildProcess } from 'child_process';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import http from 'http';
 
 const PROFILE_DIR = resolve(process.cwd(), '.chrome-profile');
-const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH ?? '/usr/bin/chromium';
+const CHROMIUM_PATH = process.env.CHROME_EXECUTABLE_PATH
+  ?? process.env.PUPPETEER_EXECUTABLE_PATH
+  ?? ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => existsSync(p))
+  ?? '/usr/bin/chromium';
 const CDP_PORT = 9224;
 const CDP_BASE = `http://localhost:${CDP_PORT}`;
 
