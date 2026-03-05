@@ -683,7 +683,7 @@ async function loadLoginStatus() {
       txt.textContent = '✅ Logged in' + (data.user ? ' as ' + data.user : '') + (data.email ? ' (' + data.email + ')' : '');
     } else {
       dot.className = 'login-dot err';
-      txt.textContent = '❌ Not logged in — sync will fail. Click Manage Login →';
+      txt.textContent = '⚠️ Not logged in — sync actions require a session. Click Manage Login →';
     }
   } catch {
     dot.className = 'login-dot err';
@@ -1042,7 +1042,7 @@ async function loadConversations() {
   if (!sel) return;
   try {
     const res = await fetch('/api/conversations', { headers: getHeaders() });
-    if (!res.ok) { sel.innerHTML = '<option value="">— Failed to load conversations —</option>'; return; }
+    if (!res.ok) { sel.innerHTML = '<option value="">— Could not load conversations (not logged in?) —</option>'; return; }
     const convs = await res.json();
     let html = '<option value="">— Select a conversation —</option>';
     html += '<option value="all">🔄 All Conversations</option>';
