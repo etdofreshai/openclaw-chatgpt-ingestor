@@ -17,6 +17,7 @@ import {
   setUserInfo,
   saveSessionToFile,
   getUserName,
+  getCookies,
 } from './session.js';
 
 const CHATGPT_BASE = 'https://chatgpt.com';
@@ -24,9 +25,37 @@ const API_BASE = `${CHATGPT_BASE}/backend-api`;
 
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1_000;
+const DEFAULT_UA = process.env.CHROME_USER_AGENT
+  ?? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getBrowserLikeHeaders(includeAuthToken = true): Record<string, string> {
+  const cookies = getCookies();
+  const oaiDid = cookies['oai-did'];
+  const headers: Record<string, string> = {
+    Cookie: getCookieString(),
+    'User-Agent': DEFAULT_UA,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Referer: 'https://chatgpt.com/',
+    Origin: 'https://chatgpt.com',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    'sec-ch-ua': '"Google Chrome";v="133", "Chromium";v="133", "Not=A?Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Linux"',
+  };
+  if (oaiDid) headers['oai-device-id'] = oaiDid;
+  if (includeAuthToken) {
+    const token = getAccessToken() ?? '';
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -129,12 +158,7 @@ export async function refreshAccessToken(): Promise<boolean> {
     try {
       console.log('[chatgpt-api] Refreshing access token...');
       const res = await fetch(`${CHATGPT_BASE}/api/auth/session`, {
-        headers: {
-          Cookie: getCookieString(),
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'application/json',
-          Referer: 'https://chatgpt.com/',
-        },
+        headers: getBrowserLikeHeaders(false),
       });
 
       if (!res.ok) {
@@ -178,16 +202,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     await refreshAccessToken();
   }
 
-  const token = getAccessToken() ?? '';
-  return {
-    Authorization: `Bearer ${token}`,
-    Cookie: getCookieString(),
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    Referer: 'https://chatgpt.com/',
-    Origin: 'https://chatgpt.com',
-  };
+  return getBrowserLikeHeaders(true);
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -207,11 +222,11 @@ async function apiGet<T>(path: string): Promise<T> {
       continue;
     }
 
-    // 401 — try token refresh once
-    if (res.status === 401 && attempt === 0) {
+    // 401/403 — try token refresh once (403 can happen with stale token/device binding)
+    if ((res.status === 401 || res.status === 403) && attempt === 0) {
       const refreshed = await refreshAccessToken();
       if (refreshed) continue;
-      throw new Error(`ChatGPT API 401 for ${path} — session expired, please re-login`);
+      if (res.status === 401) throw new Error(`ChatGPT API 401 for ${path} — session expired, please re-login`);
     }
 
     // 429 — rate limited
