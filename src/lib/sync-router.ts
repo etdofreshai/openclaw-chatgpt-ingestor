@@ -1040,19 +1040,25 @@ async function loadConversations() {
   if (_convsLoaded) return;
   const sel = document.getElementById('conv-select');
   if (!sel) return;
+  const baseOpts = '<option value="">— Select a conversation —</option><option value="all">🔄 All Conversations</option>';
   try {
     const res = await fetch('/api/conversations', { headers: getHeaders() });
-    if (!res.ok) { sel.innerHTML = '<option value="">— Could not load conversations (not logged in?) —</option>'; return; }
+    if (!res.ok) {
+      let reason = 'Unknown error';
+      try { const d = await res.json(); reason = d.error || reason; } catch {}
+      if (res.status === 401) reason = 'Not authenticated — check login or UI_TOKEN.';
+      sel.innerHTML = baseOpts + '<option disabled>⚠ ' + esc(reason) + '</option>';
+      return;
+    }
     const convs = await res.json();
-    let html = '<option value="">— Select a conversation —</option>';
-    html += '<option value="all">🔄 All Conversations</option>';
+    let html = baseOpts;
     for (const c of convs) {
       const title = (c.title || c.id).slice(0, 60);
       html += '<option value="' + esc(c.id) + '">' + esc(title) + '</option>';
     }
     sel.innerHTML = html;
     _convsLoaded = true;
-  } catch { sel.innerHTML = '<option value="">— Error loading conversations —</option>'; }
+  } catch (e) { sel.innerHTML = baseOpts + '<option disabled>⚠ Network error: ' + esc(e.message) + '</option>'; }
 }
 
 function onConvSelect() {
