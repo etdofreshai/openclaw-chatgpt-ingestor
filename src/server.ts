@@ -27,6 +27,7 @@ import {
 } from './lib/session.js';
 import { validateSession } from './lib/chatgpt-api.js';
 import syncRouter from './lib/sync-router.js';
+import backfillRouter from './lib/backfill-router.js';
 import { startScheduler } from './lib/scheduler.js';
 
 const app = express();
@@ -94,6 +95,7 @@ app.get('/', (_req, res) => {
       loginStatus: '/api/login/status',
       syncUi: '/sync',
       syncApi: '/api/sync',
+      backfill: '/backfill',
       jobs: '/api/jobs',
       runs: '/api/runs',
       sessionStatus: '/api/session/status',
@@ -179,6 +181,7 @@ app.post('/api/logout', (_req, res) => {
 });
 
 app.use(syncRouter);
+app.use(backfillRouter);
 
 // ── WebSocket handler ─────────────────────────────────────────────────────────
 

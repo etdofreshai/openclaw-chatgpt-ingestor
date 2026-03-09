@@ -29,7 +29,7 @@ import {
   type ChatGPTConversation,
   type ChatGPTMessage,
 } from './chatgpt-api.js';
-import { isApiMode, writeMessagesViaApi, type ApiMessagePayload } from './api-writer.js';
+import { isApiMode, writeMessagesViaApi, type ApiMessagePayload, type ChatGPTFileRef } from './api-writer.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -44,6 +44,7 @@ export interface NormalizedMessage {
   recipient: string;
   content: string;
   attachmentCount: number;
+  files: ChatGPTFileRef[];
   metadata: Record<string, unknown>;
 }
 
@@ -53,6 +54,8 @@ export interface SyncResult {
   updated: number;
   skipped: number;
   attachmentsSeen: number;
+  attachmentsDownloaded?: number;
+  attachmentsIngested?: number;
 }
 
 // ── Message extraction ────────────────────────────────────────────────────────
@@ -95,6 +98,19 @@ function extractMessages(conversation: ChatGPTConversation): ChatGPTMessage[] {
   return messages;
 }
 
+function guessFilename(partType: string, assetPointer: string): string {
+  const fileId = assetPointer.replace('file-service://', '');
+  if (partType === 'image_asset_pointer') return `${fileId}.jpg`;
+  if (partType === 'audio_asset_pointer') return `${fileId}.mp3`;
+  return fileId;
+}
+
+function guessMimeType(partType: string): string {
+  if (partType === 'image_asset_pointer') return 'image/jpeg';
+  if (partType === 'audio_asset_pointer') return 'audio/mpeg';
+  return 'application/octet-stream';
+}
+
 /**
  * Normalize a single ChatGPT message.
  * Returns null if the message should be skipped.
@@ -128,12 +144,21 @@ function normalizeMessage(
   const timestamp = new Date((msg.create_time ?? 0) * 1000);
   const externalId = `${conversationId}:${msg.id}`;
 
-  // Count attachments/images in content
+  // Count attachments/images in content and extract file refs
   let attachmentCount = 0;
+  const files: ChatGPTFileRef[] = [];
   if (Array.isArray(msg.content?.parts)) {
     for (const part of msg.content.parts) {
       if (typeof part === 'object' && part !== null) {
         attachmentCount++;
+        const p = part as Record<string, unknown>;
+        const partType = (p.content_type as string) ?? '';
+        const assetPointer = p.asset_pointer as string | undefined;
+        if (assetPointer && assetPointer.startsWith('file-service://')) {
+          const filename = guessFilename(partType, assetPointer);
+          const mimeType = guessMimeType(partType);
+          files.push({ assetPointer, filename, mimeType, sizeBytes: p.size_bytes as number | undefined });
+        }
       }
     }
   }
@@ -145,6 +170,7 @@ function normalizeMessage(
     recipient,
     content: text,
     attachmentCount,
+    files,
     metadata: {
       conversationId,
       conversationTitle,
@@ -337,6 +363,7 @@ export async function syncChatGPTConversation(
         metadata: msg.metadata,
       } satisfies ApiMessagePayload,
       attachmentCount: msg.attachmentCount,
+      files: msg.files,
     }));
 
     const writeResult = await writeMessagesViaApi(inputs);
