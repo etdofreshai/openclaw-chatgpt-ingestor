@@ -181,6 +181,7 @@ function normalizeMessage(
       endTurn: msg.end_turn ?? null,
       parentId: msg.metadata?.parent_id ?? null,
       contentType: msg.content?.content_type ?? null,
+      parts: msg.content?.parts ?? null,
     },
   };
 }

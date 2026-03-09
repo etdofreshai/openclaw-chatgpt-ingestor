@@ -7,6 +7,8 @@
 
 import { downloadChatGPTFile } from './attachment-downloader.js';
 import type { ApiMessagePayload } from './api-writer.js';
+import { fetchConversation } from './chatgpt-api.js';
+import { hasSession } from './session.js';
 
 export type BackfillMode = 'missing' | 'force';
 
@@ -63,7 +65,7 @@ interface PagedResponse {
   total: number;
   page: number;
   limit: number;
-  pages: number;
+  totalPages: number;
 }
 
 interface FileRef {
@@ -118,6 +120,36 @@ function extractFileRefs(metadata: Record<string, unknown>): FileRef[] {
     }
   }
 
+  return refs;
+}
+
+/**
+ * Check if a message might have attachments based on content placeholders.
+ */
+function mightHaveAttachments(content: string): boolean {
+  return content.includes('[image]') || content.includes('[audio]') || content.includes('[image_asset_pointer]');
+}
+
+/**
+ * Extract asset pointers directly from a ChatGPT message's content parts.
+ */
+function extractFromParts(parts: unknown[]): FileRef[] {
+  const refs: FileRef[] = [];
+  for (const part of parts) {
+    if (typeof part === 'object' && part !== null) {
+      const p = part as Record<string, unknown>;
+      const assetPointer = p.asset_pointer as string | undefined;
+      const partType = (p.content_type as string) ?? '';
+      if (assetPointer && assetPointer.startsWith('file-service://')) {
+        refs.push({
+          assetPointer,
+          filename: guessFilename(partType, assetPointer),
+          mimeType: guessMimeType(partType),
+          sizeBytes: p.size_bytes as number | undefined,
+        });
+      }
+    }
+  }
   return refs;
 }
 
@@ -228,7 +260,7 @@ export async function backfillAttachments(
     });
     if (firstRes.ok) {
       const firstData = await firstRes.json() as PagedResponse;
-      totalPages = firstData.pages ?? 1;
+      totalPages = firstData.totalPages ?? 1;
       if (options.limit) {
         const maxPages = Math.ceil(options.limit / 100);
         totalPages = Math.min(totalPages, maxPages + options.resumeFrom - 1);
@@ -256,7 +288,7 @@ export async function backfillAttachments(
         continue;
       }
       pageData = await res.json() as PagedResponse;
-      totalPages = pageData.pages ?? totalPages;
+      totalPages = pageData.totalPages ?? totalPages;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[backfill-attachments] Error fetching page ${page}: ${msg}`);
@@ -271,7 +303,25 @@ export async function backfillAttachments(
       processedMessages++;
 
       const metadata = message.metadata ?? {};
-      const fileRefs = extractFileRefs(metadata);
+      let fileRefs = extractFileRefs(metadata);
+
+      // Fallback: re-fetch from ChatGPT if content suggests attachments but none found in metadata
+      if (fileRefs.length === 0 && mightHaveAttachments(message.content) && hasSession()) {
+        const conversationId = metadata.conversationId as string | undefined;
+        const messageId = metadata.messageId as string | undefined;
+        if (conversationId && messageId) {
+          try {
+            const conv = await fetchConversation(conversationId);
+            const node = conv.mapping?.[messageId];
+            const parts = node?.message?.content?.parts;
+            if (Array.isArray(parts)) {
+              fileRefs = extractFromParts(parts);
+            }
+          } catch (err) {
+            console.warn(`[backfill] Failed to re-fetch conversation ${conversationId}: ${err}`);
+          }
+        }
+      }
 
       if (fileRefs.length === 0) continue;
 
