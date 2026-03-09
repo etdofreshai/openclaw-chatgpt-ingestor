@@ -223,10 +223,19 @@ async function writeToPostgres(
 // ── Sync a single conversation ────────────────────────────────────────────────
 
 async function syncOneConversation(
-  item: ChatGPTConversationListItem
+  item: ChatGPTConversationListItem,
+  sinceMs?: number
 ): Promise<NormalizedMessage[]> {
   const conv = await fetchConversation(item.id);
-  const messages = extractMessages(conv);
+  let messages = extractMessages(conv);
+
+  // Filter to only messages at or after the since cutoff
+  if (sinceMs !== undefined && sinceMs > 0) {
+    messages = messages.filter(
+      msg => msg.create_time != null && msg.create_time * 1000 >= sinceMs
+    );
+  }
+
   const title = conv.title ?? item.title ?? item.id;
 
   const normalized: NormalizedMessage[] = [];
@@ -285,7 +294,7 @@ export async function syncChatGPTConversation(
 
     for (const item of conversations) {
       try {
-        const normalized = await syncOneConversation(item);
+        const normalized = await syncOneConversation(item, options?.sinceMs);
         allNormalized.push(...normalized);
         conversationsFetched++;
 
