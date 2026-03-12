@@ -35,6 +35,8 @@ export interface Job {
   updatedAt: string;
   lastRunAt?: string;
   lastStatus?: 'success' | 'error' | 'running';
+  lastSyncedAt?: string;  // ISO timestamp of last SUCCESSFUL sync
+  startDate?: string;     // Optional floor — never fetch conversations updated before this date
 }
 
 const DATA_ROOT = process.env.DATA_DIR

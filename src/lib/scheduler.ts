@@ -57,12 +57,22 @@ async function executeJob(job: Job, overrides?: JobRunOverrides): Promise<void> 
   let effectiveSinceMs: number | undefined;
   if (overrides?.sinceMs !== undefined) {
     effectiveSinceMs = overrides.sinceMs;
+  } else if (job.lastSyncedAt) {
+    // Priority: lastSyncedAt → startDate → sincePreset (legacy) → beginning (0)
+    effectiveSinceMs = new Date(job.lastSyncedAt).getTime();
+  } else if (job.startDate) {
+    effectiveSinceMs = new Date(job.startDate).getTime();
   } else if (runSincePreset && runSincePreset !== 'all') {
     const baseMs = sincePresetToMs(runSincePreset as SincePreset);
     const lookbackMs = Math.round(baseMs * (1 + overlapPct / 100));
     effectiveSinceMs = now.getTime() - lookbackMs;
   } else if (runSincePreset === 'all') {
     effectiveSinceMs = 0; // Sync all — no cutoff
+  }
+  // Apply startDate as floor even when lastSyncedAt is set
+  if (job.startDate && effectiveSinceMs !== undefined) {
+    const startMs = new Date(job.startDate).getTime();
+    effectiveSinceMs = Math.max(effectiveSinceMs, startMs);
   }
 
   const startedAt = now.toISOString();
@@ -105,7 +115,7 @@ async function executeJob(job: Job, overrides?: JobRunOverrides): Promise<void> 
     });
 
     const finishedAt = new Date().toISOString();
-    await updateJob(job.id, { lastStatus: 'success', lastRunAt: finishedAt });
+    await updateJob(job.id, { lastStatus: 'success', lastRunAt: finishedAt, lastSyncedAt: finishedAt });
     await updateRun(run.runId, {
       finishedAt,
       status: 'success',
