@@ -282,9 +282,9 @@ function buildBackfillUI(): string {
 <p class="subtitle">Download and ingest file attachments from previously synced ChatGPT messages.</p>
 
 <div class="nav-links">
-  <a href="/sync">← Sync UI</a>
-  <a href="/login">Login</a>
-  <a href="/api/health">Health</a>
+  <a id="nav-sync">← Sync UI</a>
+  <a id="nav-login">Login</a>
+  <a id="nav-health">Health</a>
 </div>
 
 <div id="start-section">
@@ -359,6 +359,13 @@ function buildBackfillUI(): string {
 </div>
 
 <script>
+const BASE = (() => { const p = location.pathname.replace(/\\/backfill\\/?$/, ''); return p + '/api'; })();
+const NAV_BASE = location.pathname.replace(/\\/backfill\\/?$/, '');
+(function() {
+  document.getElementById('nav-sync').href = NAV_BASE + '/sync';
+  document.getElementById('nav-login').href = NAV_BASE + '/login';
+  document.getElementById('nav-health').href = BASE + '/health';
+})();
 let selectedMode = 'missing';
 let currentRunId = null;
 let eventSource = null;
@@ -379,7 +386,7 @@ async function startBackfill() {
   document.getElementById('start-btn').disabled = true;
 
   try {
-    const res = await fetch('/api/backfill/start', {
+    const res = await fetch(BASE + '/backfill/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ batchSize, limit, dryRun, resumeFrom, mode: selectedMode }),
@@ -407,7 +414,7 @@ async function startBackfill() {
 function subscribeToProgress(runId) {
   if (eventSource) { eventSource.close(); eventSource = null; }
 
-  eventSource = new EventSource('/api/backfill/progress/' + runId);
+  eventSource = new EventSource(BASE + '/backfill/progress/' + runId);
 
   eventSource.onmessage = (e) => {
     const progress = JSON.parse(e.data);
@@ -477,7 +484,7 @@ function escHtml(str) {
 
 async function loadRuns() {
   try {
-    const res = await fetch('/api/backfill/runs');
+    const res = await fetch(BASE + '/backfill/runs');
     const runs = await res.json();
     const tbody = document.getElementById('runs-table');
     if (!runs.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#666;text-align:center;padding:16px">No runs yet</td></tr>'; return; }

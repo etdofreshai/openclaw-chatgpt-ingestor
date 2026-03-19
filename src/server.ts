@@ -594,13 +594,13 @@ const LOGIN_HTML = /* html */ `<!DOCTYPE html>
 </div>
 
 <div class="nav-links">
-  <a href="/sync">→ Sync UI</a>
-  <a href="/api/session/status">→ Session Status</a>
-  <a href="/api/health">→ Health</a>
+  <a id="link-sync">→ Sync UI</a>
+  <a id="link-session">→ Session Status</a>
+  <a id="link-health">→ Health</a>
 </div>
 
 <script>
-const BASE = '/api';
+const BASE = (() => { const p = location.pathname.replace(/\\/login\\/?$/, ''); return p + '/api'; })();
 let ws = null;
 let sessionActive = false;
 let startTime = null;
@@ -649,7 +649,8 @@ function stopTimer() {
 
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(proto + '//' + location.host + '/ws/login');
+  const wsBase = location.pathname.replace(/\/login\/?$/, '');
+  ws = new WebSocket(proto + '//' + location.host + wsBase + '/ws/login');
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
@@ -674,7 +675,8 @@ function connectWs() {
         showOverlay('\u2705 Login successful! Redirecting…');
         document.getElementById('start-btn').disabled = false;
         if (ws) { try { ws.close(); } catch {} ws = null; }
-        setTimeout(() => { window.location.href = '/sync'; }, 3000);
+        const navBase = location.pathname.replace(/\/login\/?$/, '');
+        setTimeout(() => { window.location.href = navBase + '/sync'; }, 3000);
       }
     } catch(e) {}
   };
@@ -775,6 +777,14 @@ function sendKey(key) {
   if (!sessionActive || !ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: 'keydown', key }));
 }
+
+// Fix nav links for proxy-prefixed paths
+(function() {
+  const base = location.pathname.replace(/\/login\/?$/, '');
+  document.getElementById('link-sync').href = base + '/sync';
+  document.getElementById('link-session').href = base + '/api/session/status';
+  document.getElementById('link-health').href = base + '/api/health';
+})();
 </script>
 </body>
 </html>`;

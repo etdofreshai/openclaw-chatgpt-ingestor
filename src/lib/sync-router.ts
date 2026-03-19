@@ -528,8 +528,8 @@ tbody tr:hover td{background:rgba(255,255,255,.03)}
     <p class="subtitle">Pull conversations from ChatGPT into the OpenClaw memory database.</p>
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-    <a class="nav-link" href="/login">← ChatGPT Login</a>
-    <a class="nav-link" href="/backfill">🗂 Backfill Attachments</a>
+    <a class="nav-link" id="nav-login">← ChatGPT Login</a>
+    <a class="nav-link" id="nav-backfill">🗂 Backfill Attachments</a>
     <div id="auth-bar" style="display:none">
       <span class="auth-status" id="auth-status-text">🔓 Authenticated</span>
       <button class="btn btn-sm btn-ghost" onclick="clearSavedToken()">Clear Token</button>
@@ -541,7 +541,7 @@ tbody tr:hover td{background:rgba(255,255,255,.03)}
 <div class="login-status-bar" id="login-status-bar">
   <span class="login-dot" id="login-dot"></span>
   <span id="login-status-text">Checking ChatGPT session…</span>
-  <a class="nav-link" href="/login" style="margin-left:auto">Manage Login →</a>
+  <a class="nav-link" id="nav-login2" style="margin-left:auto">Manage Login →</a>
 </div>
 
 <!-- Scheduler Queue Widget -->
@@ -644,6 +644,13 @@ tbody tr:hover td{background:rgba(255,255,255,.03)}
 
 </div><!-- .page -->
 <script>
+const BASE = (() => { const p = location.pathname.replace(/\\/sync\\/?$/, ''); return p + '/api'; })();
+const NAV_BASE = location.pathname.replace(/\\/sync\\/?$/, '');
+(function() {
+  document.getElementById('nav-login').href = NAV_BASE + '/login';
+  document.getElementById('nav-backfill').href = NAV_BASE + '/backfill';
+  document.getElementById('nav-login2').href = NAV_BASE + '/login';
+})();
 const REQUIRES_AUTH = ${requiresAuth ? 'true' : 'false'};
 const TOKEN_KEY = 'chatgpt_sync_ui_token';
 const COMPACT_LABELS = ${jsCompactLabels};
@@ -675,7 +682,7 @@ async function submitModalToken() {
   if (!val) return;
   errEl.style.display = 'none';
   try {
-    const res = await fetch('/api/jobs', { headers: { 'Authorization': 'Bearer ' + val, 'Content-Type': 'application/json' } });
+    const res = await fetch(BASE + '/jobs', { headers: { 'Authorization': 'Bearer ' + val, 'Content-Type': 'application/json' } });
     if (res.status === 401) { errEl.style.display = 'block'; return; }
     saveToken(val); hideModal(); updateAuthBar(); loadAll();
   } catch { errEl.textContent = 'Network error — try again.'; errEl.style.display = 'block'; }
@@ -695,7 +702,7 @@ async function loadLoginStatus() {
   const dot = document.getElementById('login-dot');
   const txt = document.getElementById('login-status-text');
   try {
-    const res = await fetch('/api/session/status');
+    const res = await fetch(BASE + '/session/status');
     const data = await res.json();
     if (data.authenticated) {
       dot.className = 'login-dot ok';
@@ -761,7 +768,7 @@ async function handleRunSync() {
     const body = { channel };
     if (limit) body.limit = parseInt(limit, 10);
     if (sincePreset) body.sincePreset = sincePreset;
-    const res = await fetch('/api/sync', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
+    const res = await fetch(BASE + '/sync', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
     const data = await res.json();
     if (res.ok && data.success) { showResult('ok', '✅ Sync complete', data); loadRunsTable(); }
     else { showResult('error', '❌ Sync failed (HTTP ' + res.status + ')', data); }
@@ -787,7 +794,7 @@ async function handleCreateJob() {
     const body = { channel, cadencePreset: cadence, enabled: true };
     if (name) body.name = name;
     if (sincePreset) body.sincePreset = sincePreset;
-    const res = await fetch('/api/jobs', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
+    const res = await fetch(BASE + '/jobs', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
     const data = await res.json();
     if (res.ok && data.id) {
       showResult('ok', '✅ Scheduled job created: ' + esc(data.name), data);
@@ -813,7 +820,7 @@ let _loadedJobs = [];
 async function loadJobsTable() {
   const el = document.getElementById('jobs-container');
   try {
-    const res = await fetch('/api/jobs', { headers: getHeaders() });
+    const res = await fetch(BASE + '/jobs', { headers: getHeaders() });
     if (res.status === 401) { el.innerHTML = '<p style="color:#f87171;font-size:.85rem">Not authenticated.</p>'; return; }
     const jobs = await res.json();
     _loadedJobs = jobs;
@@ -929,7 +936,7 @@ async function saveEditJob() {
   if (cadence) body.cadencePreset = cadence;
   if (since) body.sincePreset = since;
   try {
-    const res = await fetch('/api/jobs/' + _editJobId, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify(body) });
+    const res = await fetch(BASE + '/jobs/' + _editJobId, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify(body) });
     const data = await res.json();
     if (res.ok && data.id) { closeEditModal(); loadJobsTable(); }
     else { errEl.textContent = data.error || 'Unknown error'; errEl.style.display = 'block'; saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
@@ -939,7 +946,7 @@ async function saveEditJob() {
 async function triggerJobRun(id, btn) {
   const orig = btn.textContent; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   try {
-    const res = await fetch('/api/jobs/' + id + '/run', { method: 'POST', headers: getHeaders() });
+    const res = await fetch(BASE + '/jobs/' + id + '/run', { method: 'POST', headers: getHeaders() });
     const data = await res.json();
     if (res.ok) { btn.textContent = '✓'; setTimeout(function() { btn.textContent = orig; btn.disabled = false; loadJobsTable(); loadRunsTable(); }, 1500); }
     else { alert('Error: ' + (data.error || 'Unknown')); btn.textContent = orig; btn.disabled = false; }
@@ -950,7 +957,7 @@ async function triggerJobRunAll(id, btn) {
   if (!confirm('Run ALL history for this conversation? This may take a while.')) return;
   const orig = btn.textContent; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
   try {
-    const res = await fetch('/api/jobs/' + id + '/run-all', { method: 'POST', headers: getHeaders() });
+    const res = await fetch(BASE + '/jobs/' + id + '/run-all', { method: 'POST', headers: getHeaders() });
     const data = await res.json();
     if (res.ok) { btn.textContent = '✓'; setTimeout(function() { btn.textContent = orig; btn.disabled = false; loadJobsTable(); loadRunsTable(); }, 1500); }
     else { alert('Error: ' + (data.error || 'Unknown')); btn.textContent = orig; btn.disabled = false; }
@@ -960,7 +967,7 @@ async function triggerJobRunAll(id, btn) {
 async function toggleJob(id, enable, btn) {
   btn.disabled = true;
   try {
-    const res = await fetch('/api/jobs/' + id, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ enabled: enable }) });
+    const res = await fetch(BASE + '/jobs/' + id, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ enabled: enable }) });
     if (res.ok) loadJobsTable();
     else { const d = await res.json(); alert('Error: ' + (d.error || 'Unknown')); btn.disabled = false; }
   } catch (err) { alert('Network error: ' + err.message); btn.disabled = false; }
@@ -970,7 +977,7 @@ async function removeJob(id, btn) {
   if (!confirm('Delete this scheduled job?')) return;
   btn.disabled = true;
   try {
-    const res = await fetch('/api/jobs/' + id, { method: 'DELETE', headers: getHeaders() });
+    const res = await fetch(BASE + '/jobs/' + id, { method: 'DELETE', headers: getHeaders() });
     if (res.ok) loadJobsTable();
     else { const d = await res.json(); alert('Error: ' + (d.error || 'Unknown')); btn.disabled = false; }
   } catch (err) { alert('Network error: ' + err.message); btn.disabled = false; }
@@ -979,7 +986,7 @@ async function removeJob(id, btn) {
 async function loadRunsTable() {
   const el = document.getElementById('runs-container');
   try {
-    const res = await fetch('/api/runs?limit=50', { headers: getHeaders() });
+    const res = await fetch(BASE + '/runs?limit=50', { headers: getHeaders() });
     if (res.status === 401) { el.innerHTML = '<p style="color:#f87171;font-size:.85rem">Not authenticated.</p>'; return; }
     const runs = await res.json();
     el.innerHTML = renderRunsTable(runs);
@@ -1024,7 +1031,7 @@ async function loadQueueStatus() {
   const el = document.getElementById('queue-status-container');
   if (!el) return;
   try {
-    const res = await fetch('/api/scheduler/status', { headers: getHeaders() });
+    const res = await fetch(BASE + '/scheduler/status', { headers: getHeaders() });
     if (res.status === 401) { el.innerHTML = '<span style="color:#f87171">Not authenticated.</span>'; return; }
     const d = await res.json();
     const runningList = d.runningIds && d.runningIds.length
@@ -1061,7 +1068,7 @@ async function loadConversations() {
   if (!sel) return;
   const baseOpts = '<option value="">— Select a conversation —</option><option value="all">🔄 All Conversations</option>';
   try {
-    const res = await fetch('/api/conversations', { headers: getHeaders() });
+    const res = await fetch(BASE + '/conversations', { headers: getHeaders() });
     if (!res.ok) {
       let reason = 'Unknown error';
       try { const d = await res.json(); reason = d.error || reason; } catch {}
