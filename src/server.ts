@@ -24,6 +24,7 @@ import {
   isAuthCookie,
   setUserInfo,
   clearSession,
+  getSessionInfo,
 } from './lib/session.js';
 import { validateSession } from './lib/chatgpt-api.js';
 import syncRouter from './lib/sync-router.js';
@@ -110,6 +111,83 @@ app.get('/api/health', async (_req, res) => {
     status: 'ok',
     authenticated: validation.valid,
     user: (validation as { user?: string }).user,
+  });
+});
+
+// Clear stale session and force re-auth
+app.post('/api/session/clear', async (_req, res) => {
+  clearSession();
+  await saveSessionToFile();
+  console.log('[session] Session cleared via API');
+  res.json({ ok: true, message: 'Session cleared. Please log in again.' });
+});
+
+// Manually set access token (e.g. extracted from browser DevTools)
+app.post('/api/session/token', express.json(), async (req, res) => {
+  const { accessToken } = req.body as { accessToken?: string };
+  if (!accessToken) {
+    res.status(400).json({ error: 'accessToken required in body' });
+    return;
+  }
+  
+  // Validate the token isn't expired
+  try {
+    const parts = accessToken.split('.');
+    if (parts.length >= 2) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: number };
+      const now = Math.floor(Date.now() / 1000);
+      if (payload.exp && payload.exp < now) {
+        res.status(400).json({ error: `Token is already expired (${now - payload.exp}s ago)` });
+        return;
+      }
+    }
+  } catch {}
+  
+  setAccessToken(accessToken);
+  await saveSessionToFile();
+  
+  // Validate it actually works
+  const validation = await validateSession();
+  if (validation.valid) {
+    console.log(`[session] Token set manually — valid for ${validation.user}`);
+    res.json({ ok: true, user: validation.user, message: `Token valid for ${validation.user}` });
+  } else {
+    res.json({ ok: true, warning: 'Token set but validation failed: ' + validation.error });
+  }
+});
+
+// Debug: show current session state (tokens redacted)
+app.get('/api/session/debug', (_req, res) => {
+  const info = getSessionInfo();
+  const token = info.accessToken;
+  let tokenInfo: Record<string, unknown> = { present: !!token };
+  if (token) {
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as Record<string, unknown>;
+        const now = Math.floor(Date.now() / 1000);
+        tokenInfo = {
+          present: true,
+          iss: payload.iss,
+          sub: typeof payload.sub === 'string' ? payload.sub.slice(0, 20) + '...' : undefined,
+          iat: payload.iat,
+          exp: payload.exp,
+          issuedAt: payload.iat ? new Date((payload.iat as number) * 1000).toISOString() : undefined,
+          expiresAt: payload.exp ? new Date((payload.exp as number) * 1000).toISOString() : undefined,
+          expiresInSeconds: payload.exp ? (payload.exp as number) - now : undefined,
+          isExpired: payload.exp ? (payload.exp as number) < now : undefined,
+        };
+      }
+    } catch {}
+  }
+  res.json({
+    hasCookies: Object.keys(info.cookies ?? {}).length > 0,
+    cookieNames: Object.keys(info.cookies ?? {}),
+    token: tokenInfo,
+    user: info.userName,
+    email: info.userEmail,
+    lastValidated: info.lastValidated,
   });
 });
 

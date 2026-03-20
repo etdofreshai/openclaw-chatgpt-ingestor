@@ -183,7 +183,8 @@ export async function refreshAccessToken(): Promise<boolean> {
           const expiresIn = (payload.exp ?? 0) - now;
           console.log(`[chatgpt-api] Token JWT: iss=${payload.iss}, sub=${payload.sub?.slice(0,20)}, iat=${payload.iat}, exp=${payload.exp}, expiresIn=${expiresIn}s`);
           if (expiresIn <= 0) {
-            console.warn(`[chatgpt-api] ⚠️ Received token is ALREADY EXPIRED (${-expiresIn}s ago)!`);
+            console.warn(`[chatgpt-api] ⚠️ Received token is ALREADY EXPIRED (${-expiresIn}s ago)! Rejecting stale token.`);
+            return false;
           }
         }
       } catch {}
