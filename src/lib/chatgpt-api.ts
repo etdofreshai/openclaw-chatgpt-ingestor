@@ -26,7 +26,7 @@ const API_BASE = `${CHATGPT_BASE}/backend-api`;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1_000;
 const DEFAULT_UA = process.env.CHROME_USER_AGENT
-  ?? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+  ?? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -46,9 +46,10 @@ function getBrowserLikeHeaders(includeAuthToken = true): Record<string, string> 
     'Sec-Fetch-Site': 'same-origin',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Dest': 'empty',
-    'sec-ch-ua': '"Google Chrome";v="133", "Chromium";v="133", "Not=A?Brand";v="24"',
+    'sec-ch-ua': '"Google Chrome";v="134", "Chromium";v="134", "Not:A-Brand";v="24"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"Linux"',
+    'oai-language': 'en-US',
   };
   if (oaiDid) headers['oai-device-id'] = oaiDid;
   if (includeAuthToken) {
@@ -224,6 +225,12 @@ async function apiGet<T>(path: string): Promise<T> {
 
     // 401/403 — try token refresh once (403 can happen with stale token/device binding)
     if ((res.status === 401 || res.status === 403) && attempt === 0) {
+      // Log the response body for debugging
+      try {
+        const errBody = await res.clone().text();
+        console.error(`[chatgpt-api] ${res.status} response for ${path}:`, errBody.slice(0, 500));
+        console.error(`[chatgpt-api] Response headers:`, JSON.stringify(Object.fromEntries(res.headers)));
+      } catch {}
       const refreshed = await refreshAccessToken();
       if (refreshed) continue;
       if (res.status === 401) throw new Error(`ChatGPT API 401 for ${path} — session expired, please re-login`);
@@ -247,7 +254,9 @@ async function apiGet<T>(path: string): Promise<T> {
     }
 
     if (!res.ok) {
-      throw new Error(`ChatGPT API HTTP ${res.status} for ${path}`);
+      let errDetail = '';
+      try { errDetail = (await res.text()).slice(0, 300); } catch {}
+      throw new Error(`ChatGPT API HTTP ${res.status} for ${path}: ${errDetail}`);
     }
 
     return res.json() as Promise<T>;
