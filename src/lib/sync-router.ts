@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { hasSession } from './session.js';
+import { hasSession, getAccessToken, getSessionInfo } from './session.js';
 import { validateSession, listConversationsForUI, fetchConversationTitle } from './chatgpt-api.js';
 import { syncChatGPTConversation } from './live-sync.js';
 import { isApiMode } from './api-writer.js';
@@ -57,12 +57,22 @@ router.get('/sync', (_req: Request, res: Response) => {
 
 router.get('/api/session/status', async (_req: Request, res: Response) => {
   if (!hasSession()) { res.json({ authenticated: false }); return; }
-  const validation = await validateSession();
+  // Check JWT expiry directly instead of re-validating server-side
+  const token = getAccessToken();
+  let isExpired = false;
+  try {
+    const parts = (token ?? '').split('.');
+    if (parts.length >= 2) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: number };
+      isExpired = !!payload.exp && payload.exp < Math.floor(Date.now() / 1000);
+    }
+  } catch {}
+  if (isExpired) { res.json({ authenticated: false, error: 'Token expired' }); return; }
+  const info = getSessionInfo();
   res.json({
-    authenticated: validation.valid,
-    user: validation.user,
-    email: validation.email,
-    error: validation.error,
+    authenticated: true,
+    user: info.userName,
+    email: info.userEmail,
   });
 });
 
@@ -110,11 +120,9 @@ router.post('/api/sync', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  const validation = await validateSession();
-  if (!validation.valid) {
-    res.status(500).json({ error: `ChatGPT session invalid: ${validation.error}` });
-    return;
-  }
+  // Skip server-side validateSession() — it re-fetches from ChatGPT and fails.
+  // hasSession() above already confirms we have a token. The actual API calls
+  // will fail with 401 if the token is truly invalid.
 
   const parsedLimit = limit !== undefined && limit !== '' ? parseInt(String(limit), 10) : undefined;
   const now = new Date();
