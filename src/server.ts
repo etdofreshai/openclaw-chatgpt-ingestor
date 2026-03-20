@@ -338,6 +338,49 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
             } else {
               console.log('[login] Access token not found in page yet — waiting...');
             }
+          } else if (purpose === 'getSessionBody') {
+            pendingCommands.delete(msg.id);
+            const body = (msg.result as { body?: string; base64Encoded?: boolean })?.body;
+            if (body && !loginDetected) {
+              console.log(`[login] Got /api/auth/session response body (${body.length} chars): ${body.slice(0, 200)}`);
+              try {
+                const parsed = JSON.parse(body) as { accessToken?: string; user?: { id?: string; name?: string; email?: string } };
+                if (parsed.accessToken) {
+                  console.log('[login] ✅ Access token captured from network intercept!');
+                  loginDetected = true;
+                  setCookies(capturedCookies);
+                  setAccessToken(parsed.accessToken);
+                  if (parsed.user) {
+                    setUserInfo({ id: parsed.user.id, name: parsed.user.name, email: parsed.user.email });
+                  }
+                  validateSession()
+                    .then(async (validation) => {
+                      if (validation.valid) {
+                        await saveSessionToFile();
+                        if (loginSession) {
+                          loginSession.status = 'success';
+                          loginSession.message = `✅ Logged in as ${validation.user}`;
+                        }
+                        if (clientWs.readyState === NodeWebSocket.OPEN) {
+                          clientWs.send(JSON.stringify({ type: 'success', user: validation.user }));
+                        }
+                        setTimeout(() => closeLoginSession(), 4000);
+                      } else {
+                        loginDetected = false;
+                        console.log('[login] Network-intercepted token failed validation:', validation.error);
+                      }
+                    })
+                    .catch((err) => {
+                      console.error('[login] Network intercept validation error:', err);
+                      loginDetected = false;
+                    });
+                } else {
+                  console.log('[login] /api/auth/session body has no accessToken — user may not be fully logged in');
+                }
+              } catch (e) {
+                console.error('[login] Failed to parse /api/auth/session body:', e);
+              }
+            }
           }
           return;
         }
@@ -452,9 +495,13 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
           // Intercept /api/auth/session response to capture token directly
           const params = msg.params as { response?: { url?: string; status?: number }; requestId?: string };
           const responseUrl = params.response?.url ?? '';
-          if (responseUrl.includes('/api/auth/session')) {
-            console.log(`[login] /api/auth/session status=${params.response?.status ?? 'unknown'} — attempting extraction...`);
-            setTimeout(() => void checkAndCapture(), 500);
+          if (responseUrl.includes('/api/auth/session') && params.response?.status === 200 && params.requestId) {
+            console.log(`[login] /api/auth/session status=${params.response?.status ?? 'unknown'} — intercepting response body (requestId=${params.requestId})...`);
+            // Try to get the actual response body via CDP
+            const bodyId = cdpCommand('Network.getResponseBody', { requestId: params.requestId });
+            pendingCommands.set(bodyId, 'getSessionBody');
+            // Also try the old method as fallback
+            setTimeout(() => void checkAndCapture(), 2000);
           }
 
         } else if (msg.method === 'Network.loadingFailed') {
