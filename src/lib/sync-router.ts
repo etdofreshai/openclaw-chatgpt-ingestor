@@ -190,7 +190,7 @@ router.post('/api/sync', requireAuth, async (req: Request, res: Response) => {
     runId: run.runId,
     channel: channel.trim(),
     channelName: convTitle ?? null,
-    user: validation.user,
+    user: getSessionInfo().userName,
     sincePreset: sincePreset ?? null,
     effectiveSinceMs: effectiveSinceMs ?? null,
     ...(syncResult ?? {}),
