@@ -173,7 +173,22 @@ export async function refreshAccessToken(): Promise<boolean> {
         return false;
       }
 
-      setAccessToken(data.accessToken);
+      // Decode JWT to check expiry
+      const token = data.accessToken;
+      try {
+        const parts = token.split('.');
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: number; iat?: number; iss?: string; sub?: string };
+          const now = Math.floor(Date.now() / 1000);
+          const expiresIn = (payload.exp ?? 0) - now;
+          console.log(`[chatgpt-api] Token JWT: iss=${payload.iss}, sub=${payload.sub?.slice(0,20)}, iat=${payload.iat}, exp=${payload.exp}, expiresIn=${expiresIn}s`);
+          if (expiresIn <= 0) {
+            console.warn(`[chatgpt-api] ⚠️ Received token is ALREADY EXPIRED (${-expiresIn}s ago)!`);
+          }
+        }
+      } catch {}
+      
+      setAccessToken(token);
       if (data.user) {
         setUserInfo({
           id: data.user.id,
