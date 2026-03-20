@@ -649,7 +649,7 @@ function stopTimer() {
 
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsBase = location.pathname.replace(/\/login\/?$/, '');
+  const wsBase = location.pathname.replace(/\\/login\\/?$/, '');
   ws = new WebSocket(proto + '//' + location.host + wsBase + '/ws/login');
   ws.onmessage = (event) => {
     try {
@@ -675,7 +675,7 @@ function connectWs() {
         showOverlay('\u2705 Login successful! Redirecting…');
         document.getElementById('start-btn').disabled = false;
         if (ws) { try { ws.close(); } catch {} ws = null; }
-        const navBase = location.pathname.replace(/\/login\/?$/, '');
+        const navBase = location.pathname.replace(/\\/login\\/?$/, '');
         setTimeout(() => { window.location.href = navBase + '/sync'; }, 3000);
       }
     } catch(e) {}
@@ -780,7 +780,7 @@ function sendKey(key) {
 
 // Fix nav links for proxy-prefixed paths
 (function() {
-  const base = location.pathname.replace(/\/login\/?$/, '');
+  const base = location.pathname.replace(/\\/login\\/?$/, '');
   document.getElementById('link-sync').href = base + '/sync';
   document.getElementById('link-session').href = base + '/api/session/status';
   document.getElementById('link-health').href = base + '/api/health';
