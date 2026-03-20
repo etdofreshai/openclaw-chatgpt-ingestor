@@ -387,30 +387,34 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
                     setUserInfo({ id: user.id, name: user.name, email: user.email });
                   }
 
-                  // Validate by calling the API
-                  validateSession()
-                    .then(async (validation) => {
-                      if (validation.valid) {
-                        await saveSessionToFile();
-                        if (loginSession) {
-                          loginSession.status = 'success';
-                          loginSession.message = `✅ Logged in as ${validation.user}`;
-                        }
-                        if (clientWs.readyState === NodeWebSocket.OPEN) {
-                          clientWs.send(JSON.stringify({ type: 'success', user: validation.user }));
-                        }
-                        setTimeout(() => closeLoginSession(), 4000);
-                      } else {
-                        loginDetected = false;
-                        extractionPending = false;
-                        console.log('[login] Token captured but validation failed:', validation.error);
+                  // Check if the token is valid (non-expired JWT)
+                  let tokenValid = false;
+                  let displayUser = user?.name ?? user?.email ?? 'Unknown';
+                  try {
+                    const parts = token.split('.');
+                    if (parts.length >= 2) {
+                      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: number };
+                      tokenValid = !!payload.exp && payload.exp > Math.floor(Date.now() / 1000);
+                    }
+                  } catch {}
+
+                  if (tokenValid) {
+                    console.log(`[login] ✅ Fresh token captured from browser! User: ${displayUser}`);
+                    saveSessionToFile().then(() => {
+                      if (loginSession) {
+                        loginSession.status = 'success';
+                        loginSession.message = `✅ Logged in as ${displayUser}`;
                       }
-                    })
-                    .catch((err) => {
-                      console.error('[login] Validation error:', err);
-                      loginDetected = false;
-                      extractionPending = false;
-                    });
+                      if (clientWs.readyState === NodeWebSocket.OPEN) {
+                        clientWs.send(JSON.stringify({ type: 'success', user: displayUser }));
+                      }
+                      setTimeout(() => closeLoginSession(), 4000);
+                    }).catch(err => console.error('[login] Save error:', err));
+                  } else {
+                    console.log('[login] Token captured but appears expired');
+                    loginDetected = false;
+                    extractionPending = false;
+                  }
                 }
               } catch {}
             } else {
@@ -424,34 +428,38 @@ export function handleLoginWs(req: IncomingMessage, socket: Socket, head: Buffer
               try {
                 const parsed = JSON.parse(body) as { accessToken?: string; user?: { id?: string; name?: string; email?: string } };
                 if (parsed.accessToken) {
-                  console.log('[login] ✅ Access token captured from network intercept!');
-                  loginDetected = true;
-                  setCookies(capturedCookies);
-                  setAccessToken(parsed.accessToken);
-                  if (parsed.user) {
-                    setUserInfo({ id: parsed.user.id, name: parsed.user.name, email: parsed.user.email });
-                  }
-                  validateSession()
-                    .then(async (validation) => {
-                      if (validation.valid) {
-                        await saveSessionToFile();
-                        if (loginSession) {
-                          loginSession.status = 'success';
-                          loginSession.message = `✅ Logged in as ${validation.user}`;
-                        }
-                        if (clientWs.readyState === NodeWebSocket.OPEN) {
-                          clientWs.send(JSON.stringify({ type: 'success', user: validation.user }));
-                        }
-                        setTimeout(() => closeLoginSession(), 4000);
-                      } else {
-                        loginDetected = false;
-                        console.log('[login] Network-intercepted token failed validation:', validation.error);
+                  // Check JWT expiry before accepting
+                  let tokenOk = false;
+                  try {
+                    const parts = parsed.accessToken.split('.');
+                    if (parts.length >= 2) {
+                      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: number };
+                      tokenOk = !!payload.exp && payload.exp > Math.floor(Date.now() / 1000);
+                    }
+                  } catch {}
+                  
+                  if (tokenOk) {
+                    console.log('[login] ✅ Fresh token captured from network intercept!');
+                    loginDetected = true;
+                    setCookies(capturedCookies);
+                    setAccessToken(parsed.accessToken);
+                    if (parsed.user) {
+                      setUserInfo({ id: parsed.user.id, name: parsed.user.name, email: parsed.user.email });
+                    }
+                    const displayUser = parsed.user?.name ?? parsed.user?.email ?? 'Unknown';
+                    saveSessionToFile().then(() => {
+                      if (loginSession) {
+                        loginSession.status = 'success';
+                        loginSession.message = `✅ Logged in as ${displayUser}`;
                       }
-                    })
-                    .catch((err) => {
-                      console.error('[login] Network intercept validation error:', err);
-                      loginDetected = false;
-                    });
+                      if (clientWs.readyState === NodeWebSocket.OPEN) {
+                        clientWs.send(JSON.stringify({ type: 'success', user: displayUser }));
+                      }
+                      setTimeout(() => closeLoginSession(), 4000);
+                    }).catch(err => console.error('[login] Save error:', err));
+                  } else {
+                    console.log('[login] Network-intercepted token is expired, ignoring');
+                  }
                 } else {
                   console.log('[login] /api/auth/session body has no accessToken — user may not be fully logged in');
                 }
