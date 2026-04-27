@@ -1,7 +1,7 @@
 import { loadJobs, updateJob, type Job } from './job-store.js';
 import { createRun, updateRun } from './run-store.js';
 import { hasSession } from './session.js';
-import { validateSession, fetchConversationTitle } from './chatgpt-api.js';
+import { fetchConversationTitle } from './chatgpt-api.js';
 import { syncChatGPTConversation } from './live-sync.js';
 import { isApiMode } from './api-writer.js';
 import {
@@ -12,6 +12,8 @@ import {
 import { enqueue } from './scheduler-queue.js';
 
 const jobTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const jobLastCompletion = new Map<string, number>(); // Track last completion timestamp per job
+const MIN_RUN_INTERVAL_MS = 60_000; // Minimum 60s between runs of the same job
 
 function clearJobTimer(jobId: string): void {
   const t = jobTimers.get(jobId);
@@ -28,23 +30,25 @@ export type JobRunOverrides = {
 };
 
 async function executeJob(job: Job, overrides?: JobRunOverrides): Promise<void> {
+  // Guard: don't re-run a job within MIN_RUN_INTERVAL_MS of last completion
+  const lastDone = jobLastCompletion.get(job.id) ?? 0;
+  if (Date.now() - lastDone < MIN_RUN_INTERVAL_MS && !overrides) {
+    console.log(`[Scheduler] Job ${job.id} (${job.name}) finished ${Math.round((Date.now() - lastDone) / 1000)}s ago — skipping rapid re-run.`);
+    return;
+  }
   if (!isApiMode() && !process.env.DATABASE_URL) {
-    console.error('[Scheduler] No write backend configured — cannot run job.');
+    console.log('[Scheduler] No write backend configured — cannot run job.');
     return;
   }
 
   if (!hasSession()) {
-    console.error(`[Scheduler] No ChatGPT session — skipping job ${job.id} (${job.name}).`);
+    console.log(`[Scheduler] No ChatGPT session — skipping job ${job.id} (${job.name}).`);
     await updateJob(job.id, { lastStatus: 'error' });
     return;
   }
 
-  const validation = await validateSession();
-  if (!validation.valid) {
-    console.error(`[Scheduler] ChatGPT session invalid — skipping job ${job.id}: ${validation.error}`);
-    await updateJob(job.id, { lastStatus: 'error' });
-    return;
-  }
+  // NOTE: Removed validateSession() pre-check — it was silently failing and blocking all syncs.
+  // The actual API calls in chatgpt-api.ts already handle token refresh and 401s gracefully.
 
   const now = new Date();
   const runSincePreset = overrides?.sincePreset ?? job.sincePreset;
@@ -127,15 +131,17 @@ async function executeJob(job: Job, overrides?: JobRunOverrides): Promise<void> 
     });
 
     console.log(`[Scheduler] Job ${job.id} done — fetched=${result.fetched} inserted=${result.inserted} updated=${result.updated}`);
+    jobLastCompletion.set(job.id, Date.now());
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error(`[Scheduler] Job ${job.id} (${job.name}) failed: ${message}`);
+    console.log(`[Scheduler] Job ${job.id} (${job.name}) failed: ${message}`);
     await updateJob(job.id, { lastStatus: 'error' });
     await updateRun(run.runId, {
       finishedAt: new Date().toISOString(),
       status: 'error',
       error: message,
     });
+    jobLastCompletion.set(job.id, Date.now());
   }
 }
 
